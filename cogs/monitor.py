@@ -33,7 +33,7 @@ def save_monitors(monitors):
 async def vinted_search(domain, query="", brand_ids=None, price_from=None, price_to=None, size_ids=None, status_ids=None, catalog_ids=None):
     """Search using vinted-api-kit library"""
     try:
-        from vinted import VintedClient, SortOrder
+        from vinted import VintedClient
         base_domain = VINTED_DOMAINS.get(domain, "vinted.de")
         
         # Build URL with filters
@@ -58,7 +58,7 @@ async def vinted_search(domain, query="", brand_ids=None, price_from=None, price
         print(f"Searching: {url}")
         
         async with VintedClient(persist_cookies=True, cookies_dir=Path("./cookies"), storage_format="json") as client:
-            items = await client.search_items(url=url, per_page=96, order=SortOrder.NEWEST_FIRST)
+            items = await client.search_items(url=url, per_page=96)
             print(f"Found {len(items)} items")
             # Convert to dict format
             result = []
