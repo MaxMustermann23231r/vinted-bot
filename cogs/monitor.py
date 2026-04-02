@@ -72,7 +72,7 @@ async def vinted_search(domain, query="", brand_ids=None, price_from=None, price
                     "size_title": item.size_title if hasattr(item, "size_title") else "",
                     "url": item.url if hasattr(item, "url") else "",
                     "currency": item.currency if hasattr(item, "currency") else "EUR",
-                    "photo": {"url": item.photo.url if hasattr(item, "photo") and item.photo else ""},
+                    "photo_url": (item.photo.url if hasattr(item.photo, "url") else str(item.photo)) if hasattr(item, "photo") and item.photo else "",
                     "user": {
                         "login": item.user.login if hasattr(item, "user") and item.user else "?",
                         "id": str(item.user.id) if hasattr(item, "user") and item.user else ""
@@ -163,8 +163,7 @@ class MonitorCog(commands.Cog):
         embed.add_field(name="👤 Verkäufer", value=f"[{seller}](https://www.{base}/members/{seller_id})" if seller_id else seller, inline=True)
         embed.add_field(name="🔗 Zum Artikel", value=f"[➜ Hier kaufen]({url})", inline=False)
 
-        photo = item.get("photo", {})
-        photo_url = photo.get("url", "") if isinstance(photo, dict) else ""
+        photo_url = item.get("photo_url", "")
         if photo_url:
             embed.set_image(url=photo_url)
 
