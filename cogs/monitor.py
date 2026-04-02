@@ -62,10 +62,6 @@ async def vinted_search(domain, query="", brand_ids=None, price_from=None, price
             print(f"Found {len(items)} items")
             # Convert to dict format
             result = []
-            if items:
-                first = items[0]
-                fields = {attr: str(getattr(first, attr, 'N/A'))[:80] for attr in dir(first) if not attr.startswith('_') and not callable(getattr(first, attr, None))}
-                print(f"ITEM FIELDS: {fields}")
             for item in items:
                 result.append({
                     "id": str(item.id),
@@ -126,12 +122,37 @@ class MonitorCog(commands.Cog):
             status_ids=f.get("status_ids", []), catalog_ids=f.get("catalog_ids", []),
         )
         seen_ids = set(mon.get("seen_ids", []))
+        max_seen_id = int(mon.get("max_seen_id", 0))
         new_items = []
+
+        # Get current max ID from results
+        current_ids = []
         for i in items:
-            item_id = str(i.get("id", ""))
-            if item_id not in seen_ids:
-                new_items.append(i)
-            seen_ids.add(item_id)
+            try:
+                current_ids.append(int(str(i.get("id", 0))))
+            except:
+                pass
+
+        current_max = max(current_ids) if current_ids else 0
+
+        if max_seen_id == 0:
+            # First run - just save max ID, send nothing
+            mon["max_seen_id"] = current_max
+            print(f"First run, saving max_id: {current_max}")
+        else:
+            # Only send items newer than what we saw at start
+            for i in items:
+                try:
+                    item_id_int = int(str(i.get("id", 0)))
+                    item_id_str = str(i.get("id", ""))
+                    if item_id_int > max_seen_id and item_id_str not in seen_ids:
+                        new_items.append(i)
+                        seen_ids.add(item_id_str)
+                except:
+                    pass
+            # Update max if we found newer items
+            if current_max > max_seen_id:
+                mon["max_seen_id"] = current_max
         mon["seen_ids"] = list(seen_ids)[-1000:]
         self.monitors[channel_id] = mon
         save_monitors(self.monitors)
