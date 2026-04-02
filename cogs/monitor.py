@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands, tasks
 import json
 import asyncio
-import aiohttp
 import time
 import re
 from pathlib import Path
@@ -10,14 +9,14 @@ from pathlib import Path
 MONITORS_FILE = "monitors.json"
 
 VINTED_DOMAINS = {
-    "de": "www.vinted.de", "at": "www.vinted.at", "fr": "www.vinted.fr",
-    "nl": "www.vinted.nl", "be": "www.vinted.be", "pl": "www.vinted.pl",
-    "es": "www.vinted.es", "it": "www.vinted.it", "cz": "www.vinted.cz",
-    "uk": "www.vinted.co.uk", "com": "www.vinted.com", "lt": "www.vinted.lt",
-    "lu": "www.vinted.lu", "se": "www.vinted.se", "fi": "www.vinted.fi",
-    "dk": "www.vinted.dk", "ro": "www.vinted.ro", "sk": "www.vinted.sk",
-    "hu": "www.vinted.hu", "hr": "www.vinted.hr", "pt": "www.vinted.pt",
-    "gr": "www.vinted.gr",
+    "de": "vinted.de", "at": "vinted.at", "fr": "vinted.fr",
+    "nl": "vinted.nl", "be": "vinted.be", "pl": "vinted.pl",
+    "es": "vinted.es", "it": "vinted.it", "cz": "vinted.cz",
+    "uk": "vinted.co.uk", "com": "vinted.com", "lt": "vinted.lt",
+    "lu": "vinted.lu", "se": "vinted.se", "fi": "vinted.fi",
+    "dk": "vinted.dk", "ro": "vinted.ro", "sk": "vinted.sk",
+    "hu": "vinted.hu", "hr": "vinted.hr", "pt": "vinted.pt",
+    "gr": "vinted.gr",
 }
 
 def load_monitors():
@@ -31,70 +30,58 @@ def save_monitors(monitors):
         json.dump(monitors, f, indent=2)
 
 
-class VintedSearcher:
-    def __init__(self):
-        self.session = None
-        self.last_cookie_refresh = {}
-
-    async def get_session(self):
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession(headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "de-DE,de;q=0.9",
-            })
-        return self.session
-
-    async def refresh_cookies(self, domain):
-        now = time.time()
-        if now - self.last_cookie_refresh.get(domain, 0) < 300:
-            return
-        try:
-            session = await self.get_session()
-            async with session.get(f"https://{VINTED_DOMAINS[domain]}/", timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                self.last_cookie_refresh[domain] = now
-                print(f"Cookies OK for {domain}: {resp.status}")
-        except Exception as e:
-            print(f"Cookie error: {e}")
-
-    async def search(self, domain, query="", brand_ids=None, price_from=None, price_to=None, size_ids=None, status_ids=None, catalog_ids=None):
-        await self.refresh_cookies(domain)
-        base = VINTED_DOMAINS.get(domain, "www.vinted.de")
-        params = [
-            ("search_text", query), ("order", "newest_first"),
-            ("per_page", "96"), ("page", "1"), ("time", str(int(time.time()))),
-        ]
+async def vinted_search(domain, query="", brand_ids=None, price_from=None, price_to=None, size_ids=None, status_ids=None, catalog_ids=None):
+    """Search using vinted-api-kit library"""
+    try:
+        from vinted import VintedClient, SortOrder
+        base_domain = VINTED_DOMAINS.get(domain, "vinted.de")
+        
+        # Build URL with filters
+        url = f"https://www.{base_domain}/catalog?"
+        params = []
+        if query:
+            params.append(f"search_text={query.replace(' ', '+')}")
         for bid in (brand_ids or []):
-            params.append(("brand_ids[]", str(bid)))
+            params.append(f"brand_ids[]={bid}")
         for sid in (size_ids or []):
-            params.append(("size_ids[]", str(sid)))
+            params.append(f"size_ids[]={sid}")
         for sid in (status_ids or []):
-            params.append(("status_ids[]", str(sid)))
+            params.append(f"status_ids[]={sid}")
         for cid in (catalog_ids or []):
-            params.append(("catalog_ids[]", str(cid)))
+            params.append(f"catalog_ids[]={cid}")
         if price_from is not None:
-            params.append(("price_from", str(price_from)))
+            params.append(f"price_from={price_from}")
         if price_to is not None:
-            params.append(("price_to", str(price_to)))
-        try:
-            session = await self.get_session()
-            url = f"https://{base}/web/api/core/catalog/items"
-            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                print(f"Search [{domain}]: {resp.status}")
-                if resp.status == 200:
-                    data = await resp.json()
-                    items = data.get("items", [])
-                    print(f"Items: {len(items)}")
-                    return items
-                elif resp.status in (401, 403):
-                    self.last_cookie_refresh[domain] = 0
-                return []
-        except Exception as e:
-            print(f"Search error: {e}")
-            return []
-
-
-searcher = VintedSearcher()
+            params.append(f"price_to={price_to}")
+        
+        url += "&".join(params)
+        print(f"Searching: {url}")
+        
+        async with VintedClient(persist_cookies=True, cookies_dir=Path("./cookies"), storage_format="json") as client:
+            items = await client.search_items(url=url, per_page=96, order=SortOrder.NEWEST_FIRST)
+            print(f"Found {len(items)} items")
+            # Convert to dict format
+            result = []
+            for item in items:
+                result.append({
+                    "id": str(item.id),
+                    "title": item.title,
+                    "price": str(item.price),
+                    "total_item_price": str(item.total_item_price) if hasattr(item, "total_item_price") else str(item.price),
+                    "brand_title": item.brand_title if hasattr(item, "brand_title") else "",
+                    "size_title": item.size_title if hasattr(item, "size_title") else "",
+                    "url": item.url if hasattr(item, "url") else "",
+                    "currency": item.currency if hasattr(item, "currency") else "EUR",
+                    "photo": {"url": item.photo.url if hasattr(item, "photo") and item.photo else ""},
+                    "user": {
+                        "login": item.user.login if hasattr(item, "user") and item.user else "?",
+                        "id": str(item.user.id) if hasattr(item, "user") and item.user else ""
+                    }
+                })
+            return result
+    except Exception as e:
+        print(f"vinted-api-kit error: {e}")
+        return []
 
 
 class MonitorCog(commands.Cog):
@@ -127,7 +114,7 @@ class MonitorCog(commands.Cog):
             return
         f = mon.get("filters", {})
         domain = f.get("domain", "de")
-        items = await searcher.search(
+        items = await vinted_search(
             domain=domain, query=f.get("query", ""),
             brand_ids=f.get("brand_ids", []), price_from=f.get("price_from"),
             price_to=f.get("price_to"), size_ids=f.get("size_ids", []),
@@ -149,7 +136,7 @@ class MonitorCog(commands.Cog):
                 print(f"Send error: {e}")
 
     def _build_embed(self, item, domain):
-        base = VINTED_DOMAINS.get(domain, "www.vinted.de")
+        base = VINTED_DOMAINS.get(domain, "vinted.de")
         title = item.get("title", "Unbekannt")
         price = item.get("price", "?")
         total_price = item.get("total_item_price", price)
@@ -159,28 +146,27 @@ class MonitorCog(commands.Cog):
         if not url:
             item_id = item.get("id", "")
             slug = re.sub(r"[^a-z0-9\-]", "", title.lower().replace(" ", "-"))[:40]
-            url = f"https://{base}/items/{item_id}-{slug}"
+            url = f"https://www.{base}/items/{item_id}-{slug}"
         user = item.get("user", {})
         seller = user.get("login", "?")
         seller_id = user.get("id", "")
-        currency = {"de": "euro", "at": "euro", "fr": "euro", "uk": "GBP", "pl": "PLN"}.get(domain, "euro")
-        currency_sym = {"de": "€", "at": "€", "fr": "€", "uk": "£", "pl": "zł"}.get(domain, "€")
+        currency = item.get("currency", "EUR")
+        sym = {"EUR": "euro", "GBP": "GBP", "PLN": "PLN", "CZK": "CZK"}.get(currency, "euro")
+        sym2 = {"EUR": "€", "GBP": "£", "PLN": "zł", "CZK": "Kč"}.get(currency, "€")
 
         embed = discord.Embed(title=f"🛍️ {title}", url=url, color=0x09B1BA)
-        embed.add_field(name="💰 Preis", value=f"**{price} {currency_sym}** (gesamt: {total_price} {currency_sym})", inline=True)
+        embed.add_field(name="💰 Preis", value=f"**{price} {sym2}** (gesamt: {total_price} {sym2})", inline=True)
         if brand:
             embed.add_field(name="🏷️ Marke", value=brand, inline=True)
         if size:
             embed.add_field(name="📏 Größe", value=size, inline=True)
-        embed.add_field(name="👤 Verkäufer", value=f"[{seller}](https://{base}/members/{seller_id})" if seller_id else seller, inline=True)
-        embed.add_field(name="🔗 Zum Artikel", value=f"[Hier klicken ➜]({url})", inline=False)
+        embed.add_field(name="👤 Verkäufer", value=f"[{seller}](https://www.{base}/members/{seller_id})" if seller_id else seller, inline=True)
+        embed.add_field(name="🔗 Zum Artikel", value=f"[➜ Hier kaufen]({url})", inline=False)
 
         photo = item.get("photo", {})
-        if photo:
-            thumbs = photo.get("thumbnails", [])
-            photo_url = thumbs[-1].get("url") if thumbs else photo.get("url", "")
-            if photo_url:
-                embed.set_image(url=photo_url)
+        photo_url = photo.get("url", "") if isinstance(photo, dict) else ""
+        if photo_url:
+            embed.set_image(url=photo_url)
 
         embed.set_footer(text=f"vinted.{domain} • {time.strftime('%H:%M:%S')}")
         return embed
@@ -293,7 +279,7 @@ class MonitorCog(commands.Cog):
     async def start_monitor(self, ctx):
         channel_id = str(ctx.channel.id)
         if channel_id not in self.monitors:
-            await ctx.send("❌ Erst `!add <Name>` benutzen.")
+            await ctx.send("❌ Erst `!add <n>` benutzen.")
             return
         f = self.monitors[channel_id].get("filters", {})
         if not f.get("query") and not f.get("brand_ids"):
@@ -325,7 +311,7 @@ class MonitorCog(commands.Cog):
     async def show_filters(self, ctx):
         channel_id = str(ctx.channel.id)
         if channel_id not in self.monitors:
-            await ctx.send("❌ Kein Monitor. Nutze `!add <Name>`.")
+            await ctx.send("❌ Kein Monitor. Nutze `!add <n>`.")
             return
         mon = self.monitors[channel_id]
         f = mon.get("filters", {})
