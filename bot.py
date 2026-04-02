@@ -1,41 +1,14 @@
 import discord
 from discord.ext import commands
-import json
 import os
-from pathlib import Path
+import asyncio
 
-# Load config
-CONFIG_FILE = "config.json"
+# Token direkt aus Umgebungsvariable
+TOKEN = os.environ.get("DISCORD_TOKEN", "")
 
-def load_config():
-    if Path(CONFIG_FILE).exists():
-        with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
-    return {"token": "", "monitors": {}}
-
-def save_config(config):
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2)
-
-config = load_config()
-
-intents = discord.Intents.default()
-intents.message_content = True
+intents = discord.Intents.all()
 
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
-
-# Load cogs
-async def main():
-    async with bot:
-        await bot.load_extension("cogs.monitor")
-        await bot.load_extension("cogs.settings")
-        await bot.load_extension("cogs.help_cmd")
-        token = config.get("token") or os.environ.get("DISCORD_TOKEN", "")
-        if not token:
-            print("❌ Kein Discord Token gefunden!")
-            print("Bitte trage deinen Token in config.json ein: { \"token\": \"DEIN_TOKEN\" }")
-            return
-        await bot.start(token)
 
 @bot.event
 async def on_ready():
@@ -46,6 +19,20 @@ async def on_ready():
         name="Vinted 👀 | !help"
     ))
 
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    print(f"Nachricht empfangen: {message.content} von {message.author}")
+    await bot.process_commands(message)
+
+async def main():
+    async with bot:
+        await bot.load_extension("cogs.monitor")
+        await bot.load_extension("cogs.settings")
+        await bot.load_extension("cogs.help_cmd")
+        print(f"Token gefunden: {'Ja' if TOKEN else 'NEIN - FEHLER!'}")
+        await bot.start(TOKEN)
+
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
