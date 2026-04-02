@@ -63,9 +63,7 @@ async def vinted_search(domain, query="", brand_ids=None, price_from=None, price
             # Convert to dict format
             result = []
             for item in items:
-                # Debug: print all available fields
-            print(f"Item fields: {[attr for attr in dir(item) if not attr.startswith('_')]}")
-            result.append({
+                result.append({
                     "id": str(item.id),
                     "title": item.title,
                     "price": str(item.price),
@@ -124,12 +122,34 @@ class MonitorCog(commands.Cog):
             status_ids=f.get("status_ids", []), catalog_ids=f.get("catalog_ids", []),
         )
         seen_ids = set(mon.get("seen_ids", []))
+        max_seen_id = mon.get("max_seen_id", 0)
         new_items = []
-        for i in items:
-            item_id = str(i.get("id", ""))
-            if item_id not in seen_ids:
-                new_items.append(i)
+
+        # First run: just save all IDs and max_id, send nothing
+        if max_seen_id == 0 and len(seen_ids) == 0:
+            for i in items:
+                item_id = str(i.get("id", ""))
                 seen_ids.add(item_id)
+                try:
+                    if int(item_id) > max_seen_id:
+                        max_seen_id = int(item_id)
+                except:
+                    pass
+            mon["max_seen_id"] = max_seen_id
+        else:
+            # Only send items with higher ID than what we saw at start
+            for i in items:
+                item_id = str(i.get("id", ""))
+                try:
+                    numeric_id = int(item_id)
+                except:
+                    numeric_id = 0
+                if item_id not in seen_ids and numeric_id > max_seen_id:
+                    new_items.append(i)
+                    seen_ids.add(item_id)
+                    if numeric_id > max_seen_id:
+                        max_seen_id = numeric_id
+            mon["max_seen_id"] = max_seen_id
         mon["seen_ids"] = list(seen_ids)[-1000:]
         self.monitors[channel_id] = mon
         save_monitors(self.monitors)
