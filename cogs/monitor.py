@@ -73,6 +73,7 @@ async def vinted_search(domain, query="", brand_ids=None, price_from=None, price
                     "url": item.url if hasattr(item, "url") else "",
                     "currency": item.currency if hasattr(item, "currency") else "EUR",
                     "photo_url": (item.photo.url if hasattr(item.photo, "url") else str(item.photo)) if hasattr(item, "photo") and item.photo else "",
+                    "created_at_ts": item.created_at_ts if hasattr(item, "created_at_ts") else (item.created_at.timestamp() if hasattr(item, "created_at") and item.created_at else 0),
                     "user": {
                         "login": item.user.login if hasattr(item, "user") and item.user else "?",
                         "id": str(item.user.id) if hasattr(item, "user") and item.user else ""
@@ -121,9 +122,16 @@ class MonitorCog(commands.Cog):
             status_ids=f.get("status_ids", []), catalog_ids=f.get("catalog_ids", []),
         )
         seen_ids = set(mon.get("seen_ids", []))
-        new_items = [i for i in items if str(i.get("id", "")) not in seen_ids]
-        for item in new_items:
-            seen_ids.add(str(item.get("id", "")))
+        now = time.time()
+        new_items = []
+        for i in items:
+            item_id = str(i.get("id", ""))
+            if item_id not in seen_ids:
+                # Check if item was created recently (last 10 minutes)
+                created_at = i.get("created_at_ts", 0)
+                if created_at == 0 or (now - created_at) < 600:
+                    new_items.append(i)
+                seen_ids.add(item_id)
         mon["seen_ids"] = list(seen_ids)[-1000:]
         self.monitors[channel_id] = mon
         save_monitors(self.monitors)
