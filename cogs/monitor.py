@@ -122,38 +122,17 @@ class MonitorCog(commands.Cog):
             status_ids=f.get("status_ids", []), catalog_ids=f.get("catalog_ids", []),
         )
         seen_ids = set(mon.get("seen_ids", []))
-        max_seen_id = int(mon.get("max_seen_id", 0))
         new_items = []
 
-        # Get current max ID from results
-        current_ids = []
         for i in items:
-            try:
-                current_ids.append(int(str(i.get("id", 0))))
-            except:
-                pass
+            item_id = str(i.get("id", ""))
+            if item_id not in seen_ids:
+                new_items.append(i)
+            seen_ids.add(item_id)
+        
+        # Keep only last 5000 seen ids
+        mon["seen_ids"] = list(seen_ids)[-5000:]
 
-        current_max = max(current_ids) if current_ids else 0
-
-        if max_seen_id == 0:
-            # First run - just save max ID, send nothing
-            mon["max_seen_id"] = current_max
-            print(f"First run, saving max_id: {current_max}")
-        else:
-            # Only send items newer than what we saw at start
-            for i in items:
-                try:
-                    item_id_int = int(str(i.get("id", 0)))
-                    item_id_str = str(i.get("id", ""))
-                    if item_id_int > max_seen_id and item_id_str not in seen_ids:
-                        new_items.append(i)
-                        seen_ids.add(item_id_str)
-                except:
-                    pass
-            # Update max if we found newer items
-            if current_max > max_seen_id:
-                mon["max_seen_id"] = current_max
-        mon["seen_ids"] = list(seen_ids)[-1000:]
         self.monitors[channel_id] = mon
         save_monitors(self.monitors)
         for item in new_items[:5]:
@@ -315,6 +294,7 @@ class MonitorCog(commands.Cog):
             return
         self.monitors[channel_id]["active"] = True
         self.monitors[channel_id]["seen_ids"] = []
+        self.monitors[channel_id]["max_seen_id"] = 0
         save_monitors(self.monitors)
         embed = discord.Embed(title="✅ Monitor gestartet!", color=0x00C853)
         embed.add_field(name="🌍 Domain", value=f"vinted.{f.get('domain','de')}", inline=True)
