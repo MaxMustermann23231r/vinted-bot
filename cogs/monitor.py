@@ -63,7 +63,9 @@ async def vinted_search(domain, query="", brand_ids=None, price_from=None, price
             # Convert to dict format
             result = []
             for item in items:
-                result.append({
+                # Debug: print all available fields
+            print(f"Item fields: {[attr for attr in dir(item) if not attr.startswith('_')]}")
+            result.append({
                     "id": str(item.id),
                     "title": item.title,
                     "price": str(item.price),
