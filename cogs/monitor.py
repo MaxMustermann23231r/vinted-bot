@@ -209,8 +209,16 @@ class MonitorCog(commands.Cog):
             seen_ids.add(item_id)
 
             # Parse created_at
+            # Print ALL keys of first item to find date field
+            if len(seen_ids) <= 2:
+                print(f"DEBUG ALL KEYS: {list(raw.keys())}")
+                print(f"DEBUG FULL ITEM: {raw}")
+            created_val = None
+            for field in ["created_at_ts", "created_at", "updated_at_ts", "updated_at", "last_push_up_at", "photo"]:
+                v = raw.get(field)
+                if v is not None:
+                    print(f"DEBUG field {field} = {str(v)[:80]}")
             created_val = raw.get("created_at_ts") or raw.get("created_at") or raw.get("updated_at_ts") or raw.get("updated_at")
-            print(f"DEBUG created_val: {created_val}, type: {type(created_val)}")
             created_ts, created_str = parse_created_ts(created_val, now_ts)
 
             # Only show if created after monitor start
