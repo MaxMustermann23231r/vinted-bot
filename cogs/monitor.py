@@ -209,17 +209,24 @@ class MonitorCog(commands.Cog):
             seen_ids.add(item_id)
 
             # Parse created_at
-            # Print ALL keys of first item to find date field
-            if len(seen_ids) <= 2:
-                print(f"DEBUG ALL KEYS: {list(raw.keys())}")
-                print(f"DEBUG FULL ITEM: {raw}")
-            created_val = None
-            for field in ["created_at_ts", "created_at", "updated_at_ts", "updated_at", "last_push_up_at", "photo"]:
-                v = raw.get(field)
-                if v is not None:
-                    print(f"DEBUG field {field} = {str(v)[:80]}")
-            created_val = raw.get("created_at_ts") or raw.get("created_at") or raw.get("updated_at_ts") or raw.get("updated_at")
-            created_ts, created_str = parse_created_ts(created_val, now_ts)
+            # Get timestamp from photo object
+            created_ts_raw = 0
+            try:
+                photo = raw.get("photo", {}) or {}
+                if isinstance(photo, dict):
+                    created_ts_raw = int(photo.get("timestamp", 0) or 0)
+                if created_ts_raw == 0:
+                    photos = raw.get("photos", []) or []
+                    if photos and isinstance(photos[0], dict):
+                        created_ts_raw = int(photos[0].get("timestamp", 0) or 0)
+            except Exception as e:
+                print(f"timestamp error: {e}")
+            created_val = created_ts_raw if created_ts_raw > 0 else None
+            if isinstance(created_val, (int, float)) and created_val > 0:
+                created_ts = float(created_val)
+                created_str = time_ago(now_ts - created_ts)
+            else:
+                created_ts, created_str = parse_created_ts(created_val, now_ts)
 
             # Only show if created after monitor start
             if created_ts > 0 and created_ts < start_ts:
