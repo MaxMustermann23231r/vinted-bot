@@ -297,7 +297,7 @@ class MonitorCog(commands.Cog):
 
         embed = discord.Embed(title=f"🛍️ {title}", url=url, color=color)
         embed.add_field(name="💰 Kaufpreis", value=f"**{price} {sym}**\n(+Versand: {total_price} {sym})", inline=True)
-        embed.add_field(name="📈 Wiederverkauf", value=resell_price(price), inline=True)
+
         if brand:
             embed.add_field(name="🏷️ Marke", value=brand, inline=True)
         if size:
