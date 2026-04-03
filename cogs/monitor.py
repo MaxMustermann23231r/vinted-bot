@@ -209,7 +209,8 @@ class MonitorCog(commands.Cog):
             seen_ids.add(item_id)
 
             # Parse created_at
-            created_val = raw.get("created_at_ts") or raw.get("created_at") or raw.get("updated_at_ts")
+            created_val = raw.get("created_at_ts") or raw.get("created_at") or raw.get("updated_at_ts") or raw.get("updated_at")
+            print(f"DEBUG created_val: {created_val}, type: {type(created_val)}")
             created_ts, created_str = parse_created_ts(created_val, now_ts)
 
             # Only show if created after monitor start
@@ -229,13 +230,14 @@ class MonitorCog(commands.Cog):
             new_items.append({
                 "id": item_id,
                 "title": raw.get("title", "Unbekannt"),
-                "price": str(raw.get("price", "?")),
-                "total_item_price": str(raw.get("total_item_price", raw.get("price", "?"))),
+                "price": str(raw["price"]["amount"] if isinstance(raw.get("price"), dict) else raw.get("price", "?")),
+                "total_item_price": str(raw["total_item_price"]["amount"] if isinstance(raw.get("total_item_price"), dict) else raw.get("total_item_price", raw.get("price", "?"))),
+                "currency": str(raw["price"]["currency_code"] if isinstance(raw.get("price"), dict) else raw.get("currency", "EUR")),
                 "brand_title": raw.get("brand_title", ""),
                 "size_title": raw.get("size_title", ""),
                 "status": raw.get("status", ""),
                 "url": raw.get("url", ""),
-                "currency": raw.get("currency", "EUR"),
+
                 "photo_url": photo_url,
                 "created_str": created_str,
                 "user_login": user.get("login", "?"),
