@@ -112,27 +112,27 @@ async def vinted_search(domain, query="", brand_ids=None, price_from=None,
                 # --- Created at (try multiple fields) ---
                 created_ts = 0
                 created_str = "Gerade eben"
-                for field in ["created_at_ts", "created_at", "updated_at"]:
-                    val = getattr(item, field, None)
+                # created_at_ts is a string like '2026-04-03 10:55:40+00:00'
+                try:
+                    val = getattr(item, "created_at_ts", None)
                     if val is None:
-                        continue
-                    try:
-                        if isinstance(val, (int, float)):
-                            created_ts = float(val)
+                        val = getattr(item, "created_at", None)
+                    if val is not None:
+                        if isinstance(val, str):
+                            val = val.replace(" ", "T")
+                            if "+" not in val and "Z" not in val:
+                                val += "+00:00"
+                            dt = datetime.fromisoformat(val)
+                            created_ts = dt.timestamp()
                             created_str = time_ago(now_ts - created_ts)
-                            break
                         elif hasattr(val, "timestamp"):
                             created_ts = val.timestamp()
                             created_str = time_ago(now_ts - created_ts)
-                            break
-                        elif isinstance(val, str) and val:
-                            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-                            created_ts = dt.timestamp()
+                        elif isinstance(val, (int, float)):
+                            created_ts = float(val)
                             created_str = time_ago(now_ts - created_ts)
-                            break
-                    except Exception as e:
-                        print(f"created_at parse error ({field}): {e}")
-                        continue
+                except Exception as e:
+                    print(f"created_at parse error: {e}")
 
                 # --- Photo ---
                 photo_url = ""
@@ -156,11 +156,20 @@ async def vinted_search(domain, query="", brand_ids=None, price_from=None,
                 try:
                     user = getattr(item, "user", None)
                     if user:
-                        seller_login = str(getattr(user, "login", "") or "?")
-                        seller_id = str(getattr(user, "id", "") or "")
-                        fc = getattr(user, "feedback_count", None) or getattr(user, "positive_feedback_count", None)
-                        if fc is not None:
-                            feedback_count = str(fc)
+                        login = getattr(user, "login", None)
+                        uid = getattr(user, "id", None)
+                        seller_login = str(login) if login else "?"
+                        seller_id = str(uid) if uid else ""
+                        for fc_field in ["feedback_count", "positive_feedback_count", "feedback_reputation"]:
+                            fc = getattr(user, fc_field, None)
+                            if fc is not None:
+                                feedback_count = str(fc)
+                                break
+                    # Also try direct item attributes
+                    if seller_login == "?":
+                        login = getattr(item, "user_login", None) or getattr(item, "seller_login", None)
+                        if login:
+                            seller_login = str(login)
                 except Exception as e:
                     print(f"user error: {e}")
 
