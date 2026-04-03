@@ -30,34 +30,24 @@ def save_monitors(monitors):
     with open(MONITORS_FILE, "w") as f:
         json.dump(monitors, f, indent=2)
 
-def time_ago(dt):
-    if dt is None:
-        return "Unbekannt"
-    try:
-        if isinstance(dt, str):
-            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
-        now = datetime.now(timezone.utc)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        diff = int((now - dt).total_seconds())
-        if diff < 60:
-            return f"vor {diff} Sekunden"
-        elif diff < 3600:
-            return f"vor {diff // 60} Minuten"
-        elif diff < 86400:
-            return f"vor {diff // 3600} Stunden"
-        else:
-            return f"vor {diff // 86400} Tagen"
-    except:
-        return "Unbekannt"
+def time_ago(seconds):
+    if seconds < 60:
+        return f"vor {int(seconds)} Sekunden"
+    elif seconds < 3600:
+        return f"vor {int(seconds // 60)} Minuten"
+    elif seconds < 86400:
+        return f"vor {int(seconds // 3600)} Stunden"
+    else:
+        return f"vor {int(seconds // 86400)} Tagen"
 
-def star_rating(rating):
+def resell_price(price_str):
     try:
-        r = float(rating)
-        full = int(r)
-        return "⭐" * full + ("" if r == full else "✨") + f" ({r:.1f})"
+        price = float(str(price_str).replace(",", "."))
+        low = round(price * 1.3, 2)
+        high = round(price * 1.6, 2)
+        return f"~{low:.0f}€ – {high:.0f}€"
     except:
-        return "⭐⭐⭐⭐⭐"
+        return "?"
 
 
 async def vinted_search(domain, query="", brand_ids=None, price_from=None,
@@ -82,80 +72,121 @@ async def vinted_search(domain, query="", brand_ids=None, price_from=None,
             params.append(f"price_to={price_to}")
 
         url = f"https://www.{base_domain}/catalog?" + "&".join(params)
-        print(f"Searching: {url[:80]}")
+        print(f"Searching: {url[:100]}")
 
         async with VintedClient(persist_cookies=True, cookies_dir=Path("./cookies"), storage_format="json") as client:
             items = await client.search_items(url=url, per_page=96)
             print(f"Found {len(items)} items")
-            result = []
-            for item in items:
-                # Get created_at as timestamp
-                created_ts = 0
-                created_str = "Unbekannt"
-                try:
-                    ca = getattr(item, "created_at", None)
-                    if ca is not None:
-                        if hasattr(ca, "timestamp"):
-                            created_ts = ca.timestamp()
-                            created_str = time_ago(ca)
-                        elif isinstance(ca, (int, float)):
-                            created_ts = float(ca)
-                            dt = datetime.fromtimestamp(created_ts, tz=timezone.utc)
-                            created_str = time_ago(dt)
-                        elif isinstance(ca, str):
-                            dt = datetime.fromisoformat(ca.replace("Z", "+00:00"))
-                            created_ts = dt.timestamp()
-                            created_str = time_ago(dt)
-                except Exception as e:
-                    print(f"created_at error: {e}")
 
-                # Get photo url
+            # Debug first item fields once
+            if items:
+                first = items[0]
+                all_attrs = {a: str(getattr(first, a, ""))[:60] for a in dir(first) if not a.startswith("_") and not callable(getattr(first, a, None))}
+                print(f"DEBUG FIELDS: {all_attrs}")
+
+            result = []
+            now_ts = time.time()
+
+            for item in items:
+                # --- ID ---
+                item_id = str(getattr(item, "id", ""))
+
+                # --- Title ---
+                title = str(getattr(item, "title", "Unbekannt") or "Unbekannt")
+
+                # --- Price ---
+                price = str(getattr(item, "price", "?") or "?")
+                total_price = str(getattr(item, "total_item_price", None) or price)
+
+                # --- Brand / Size / Status ---
+                brand = str(getattr(item, "brand_title", "") or "")
+                size = str(getattr(item, "size_title", "") or "")
+                status = str(getattr(item, "status", "") or "")
+
+                # --- URL ---
+                item_url = str(getattr(item, "url", "") or "")
+
+                # --- Currency ---
+                currency = str(getattr(item, "currency", "EUR") or "EUR")
+
+                # --- Created at (try multiple fields) ---
+                created_ts = 0
+                created_str = "Gerade eben"
+                for field in ["created_at_ts", "created_at", "updated_at"]:
+                    val = getattr(item, field, None)
+                    if val is None:
+                        continue
+                    try:
+                        if isinstance(val, (int, float)):
+                            created_ts = float(val)
+                            created_str = time_ago(now_ts - created_ts)
+                            break
+                        elif hasattr(val, "timestamp"):
+                            created_ts = val.timestamp()
+                            created_str = time_ago(now_ts - created_ts)
+                            break
+                        elif isinstance(val, str) and val:
+                            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                            created_ts = dt.timestamp()
+                            created_str = time_ago(now_ts - created_ts)
+                            break
+                    except Exception as e:
+                        print(f"created_at parse error ({field}): {e}")
+                        continue
+
+                # --- Photo ---
                 photo_url = ""
                 try:
                     photo = getattr(item, "photo", None)
                     if photo:
-                        if hasattr(photo, "url"):
-                            photo_url = photo.url
-                        elif hasattr(photo, "full_size_url"):
-                            photo_url = photo.full_size_url
-                        elif isinstance(photo, str):
+                        for attr in ["url", "full_size_url", "dominant_color"]:
+                            v = getattr(photo, attr, None)
+                            if v and isinstance(v, str) and v.startswith("http"):
+                                photo_url = v
+                                break
+                        if not photo_url and isinstance(photo, str) and photo.startswith("http"):
                             photo_url = photo
-                except:
-                    pass
+                except Exception as e:
+                    print(f"photo error: {e}")
 
-                # Get rating
-                rating = ""
+                # --- User ---
+                seller_login = "?"
+                seller_id = ""
+                feedback_count = ""
                 try:
                     user = getattr(item, "user", None)
                     if user:
-                        rating = str(getattr(user, "feedback_reputation", "") or
-                                    getattr(user, "rating", "") or "")
-                except:
-                    pass
+                        seller_login = str(getattr(user, "login", "") or "?")
+                        seller_id = str(getattr(user, "id", "") or "")
+                        fc = getattr(user, "feedback_count", None) or getattr(user, "positive_feedback_count", None)
+                        if fc is not None:
+                            feedback_count = str(fc)
+                except Exception as e:
+                    print(f"user error: {e}")
 
                 result.append({
-                    "id": str(item.id),
-                    "title": str(getattr(item, "title", "Unbekannt")),
-                    "price": str(getattr(item, "price", "?")),
-                    "total_item_price": str(getattr(item, "total_item_price", None) or getattr(item, "price", "?")),
-                    "brand_title": str(getattr(item, "brand_title", "") or ""),
-                    "size_title": str(getattr(item, "size_title", "") or ""),
-                    "status": str(getattr(item, "status", "") or ""),
-                    "url": str(getattr(item, "url", "") or ""),
-                    "currency": str(getattr(item, "currency", "EUR") or "EUR"),
+                    "id": item_id,
+                    "title": title,
+                    "price": price,
+                    "total_item_price": total_price,
+                    "brand_title": brand,
+                    "size_title": size,
+                    "status": status,
+                    "url": item_url,
+                    "currency": currency,
                     "photo_url": photo_url,
                     "created_ts": created_ts,
                     "created_str": created_str,
-                    "rating": rating,
-                    "user": {
-                        "login": str(getattr(getattr(item, "user", None), "login", "?") or "?"),
-                        "id": str(getattr(getattr(item, "user", None), "id", "") or ""),
-                        "feedback_count": str(getattr(getattr(item, "user", None), "feedback_count", "") or ""),
-                    }
+                    "user_login": seller_login,
+                    "user_id": seller_id,
+                    "feedback_count": feedback_count,
                 })
+
             return result
     except Exception as e:
         print(f"Search error: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
@@ -177,6 +208,8 @@ class MonitorCog(commands.Cog):
                 await self._check_monitor(channel_id, mon)
             except Exception as e:
                 print(f"Monitor error [{channel_id}]: {e}")
+                import traceback
+                traceback.print_exc()
 
     @monitor_loop.before_loop
     async def before_monitor(self):
@@ -189,6 +222,7 @@ class MonitorCog(commands.Cog):
             return
         f = mon.get("filters", {})
         domain = f.get("domain", "de")
+        start_ts = float(mon.get("start_ts", time.time()))
 
         items = await vinted_search(
             domain=domain, query=f.get("query", ""),
@@ -198,16 +232,18 @@ class MonitorCog(commands.Cog):
         )
 
         seen_ids = set(mon.get("seen_ids", []))
-        start_ts = float(mon.get("start_ts", 0))
         new_items = []
 
         for i in items:
-            item_id = str(i.get("id", ""))
-            if item_id in seen_ids:
+            item_id = i.get("id", "")
+            if not item_id or item_id in seen_ids:
+                seen_ids.add(item_id)
                 continue
+
             seen_ids.add(item_id)
-            # Only send if created AFTER monitor start
             created_ts = float(i.get("created_ts", 0))
+
+            # Only show if created after monitor start OR created_ts unknown
             if created_ts == 0 or created_ts >= start_ts:
                 new_items.append(i)
 
@@ -231,41 +267,40 @@ class MonitorCog(commands.Cog):
         brand = item.get("brand_title", "")
         size = item.get("size_title", "")
         condition = item.get("status", "")
-        created_str = item.get("created_str", "Unbekannt")
+        created_str = item.get("created_str", "Gerade eben")
+        seller = item.get("user_login", "?")
+        seller_id = item.get("user_id", "")
+        feedback_count = item.get("feedback_count", "")
         url = item.get("url", "")
+
         if not url:
             item_id = item.get("id", "")
-            slug = re.sub(r"[^a-z0-9\-]", "", title.lower().replace(" ", "-"))[:40]
+            slug = re.sub(r"[^a-z0-9-]", "", title.lower().replace(" ", "-"))[:40]
             url = f"https://www.{base}/items/{item_id}-{slug}"
 
-        user = item.get("user", {})
-        seller = user.get("login", "?")
-        seller_id = user.get("id", "")
-        feedback_count = user.get("feedback_count", "")
-        rating = item.get("rating", "")
+        sym = {"EUR": "€", "GBP": "£", "PLN": "zl", "CZK": "Kc"}.get(item.get("currency", "EUR"), "€")
 
-        sym = {"EUR": "€", "GBP": "£", "PLN": "zł", "CZK": "Kč"}.get(item.get("currency", "EUR"), "€")
-
-        # Color based on condition
-        color_map = {"Neu": 0x00C853, "Sehr gut": 0x2196F3, "Gut": 0xFF9800, "Befriedigend": 0x9E9E9E}
+        color_map = {"Neu": 0x00C853, "Sehr gut": 0x2196F3, "Gut": 0xFF9800, "Befriedigend": 0x9E9E9E, "New": 0x00C853, "Very good": 0x2196F3, "Good": 0xFF9800}
         color = color_map.get(condition, 0x09B1BA)
 
         embed = discord.Embed(title=f"🛍️ {title}", url=url, color=color)
 
-        embed.add_field(name="💰 Preis", value=f"**{price} {sym}** (+ Versand: {total_price} {sym})", inline=True)
+        embed.add_field(name="💰 Kaufpreis", value=f"**{price} {sym}**\n(+Versand: {total_price} {sym})", inline=True)
+        embed.add_field(name="📈 Wiederverkauf", value=resell_price(price), inline=True)
+
         if brand:
             embed.add_field(name="🏷️ Marke", value=brand, inline=True)
         if size:
             embed.add_field(name="📏 Größe", value=size, inline=True)
         if condition:
             embed.add_field(name="✨ Zustand", value=condition, inline=True)
+
         embed.add_field(name="🕐 Hochgeladen", value=created_str, inline=True)
 
-        # Seller with rating
-        seller_text = f"[{seller}](https://www.{base}/members/{seller_id})" if seller_id else seller
+        seller_val = f"[{seller}](https://www.{base}/members/{seller_id})" if seller_id else seller
         if feedback_count:
-            seller_text += f"\n⭐ {feedback_count} Bewertungen"
-        embed.add_field(name="👤 Verkäufer", value=seller_text, inline=True)
+            seller_val += f"\n⭐ {feedback_count} Bewertungen"
+        embed.add_field(name="👤 Verkäufer", value=seller_val, inline=True)
 
         embed.add_field(name="🔗 Zum Artikel", value=f"[➜ Jetzt ansehen]({url})", inline=False)
 
@@ -393,13 +428,14 @@ class MonitorCog(commands.Cog):
         self.monitors[channel_id]["seen_ids"] = []
         self.monitors[channel_id]["start_ts"] = time.time()
         save_monitors(self.monitors)
-        embed = discord.Embed(title="✅ Monitor gestartet!", color=0x00C853)
+        embed = discord.Embed(title="✅ Monitor gestartet!", color=0x00C853,
+                              description="Nur Artikel die **jetzt neu** eingestellt werden kommen rein!")
         embed.add_field(name="🌍 Domain", value=f"vinted.{f.get('domain','de')}", inline=True)
         if f.get("query"):
             embed.add_field(name="🔍 Suche", value=f["query"], inline=True)
         if f.get("brand_names"):
             embed.add_field(name="🏷️ Marke", value=", ".join(f["brand_names"]), inline=True)
-        embed.set_footer(text="Prüft alle 3 Sekunden • nur NEUE Artikel • !stop zum Stoppen")
+        embed.set_footer(text="Prüft alle 3 Sekunden • !stop zum Stoppen")
         await ctx.send(embed=embed)
 
     @commands.command(name="stop")
